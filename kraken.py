@@ -14,6 +14,11 @@ import sys
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_EVEN
 from pathlib import Path
+import warnings
+
+# macOS system Python links LibreSSL; urllib3 warns about it on every import.
+# Harmless for HTTPS to Kraken, so keep it out of the output.
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 import krakenex
 from dotenv import load_dotenv
@@ -316,9 +321,12 @@ def run_preflight(api: krakenex.API, doc: dict) -> None:
         print(f"      {pair}: last = {prices[pair]}")
 
     print("\n[3/4] Checking balances...")
-    resp = api.query_private("Balance")
-    _assert_no_error(resp, "Balance")
-    balances = {k: Decimal(v) for k, v in resp["result"].items()}
+    # BalanceEx, not Balance: funds reserved by open orders (hold_trade) are
+    # not spendable, and Kraken rejects new orders against them.
+    resp = api.query_private("BalanceEx")
+    _assert_no_error(resp, "BalanceEx")
+    balances = {k: Decimal(v["balance"]) - Decimal(v.get("hold_trade", "0"))
+                for k, v in resp["result"].items()}
 
     sell_needed = {}   # base asset -> volume required
     buy_cost = {}      # quote asset -> estimated cost
