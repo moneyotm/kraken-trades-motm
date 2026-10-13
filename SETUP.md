@@ -65,8 +65,8 @@ make one with the smallest set of permissions that still lets it place orders.
    - Create and modify orders
    - Cancel and close orders
 5. Leave **off** everything to do with withdrawals, deposits, transfers,
-   staking, earn, or exporting data. If the tool cannot withdraw, a stolen key
-   cannot withdraw either.
+   staking, earn, or exporting data. You can add "Withdraw funds" later if
+   you want the optional withdraw commands (see "Optional. Withdrawals").
 6. Optional but recommended: set an expiry date a few months out. You can
    always make a new key.
 7. Click **Generate key**.
@@ -137,31 +137,24 @@ short, lowercase, and with no spaces.
 Skip this unless you want Claude to prepare withdrawals for you. Most members
 never need it, and you can always withdraw on Kraken's website instead.
 
-Withdrawals use their own key, separate from your trading key. Your trading key
-keeps the exact permissions from Step 4 and never gets withdrawal permission.
-That way the key you use every day still cannot move funds off Kraken.
+The withdraw commands are built in. They work only when your API key has
+Kraken's "Withdraw funds" permission, so that checkbox on Kraken is your on and
+off switch.
+
+Kraken only lets an API key send to addresses you saved and confirmed by email
+on its website. The key cannot add new ones. So if your key ever leaked, the
+worst it could do is move funds to addresses on your own saved list. That is
+why the rule is simple: **only save addresses you control**, such as your own
+Ledger or Tangem wallet.
 
 1. On Kraken's website, save every address you want to send to: Funding, then
    Withdraw, pick the asset, then Add address. Give each one a clear name such
    as `My Ledger XRP`, and confirm the email Kraken sends you. The tool can only
    send to addresses saved this way. It cannot add new ones.
-2. Go to https://www.kraken.com/u/security/api and create a **new** key named
-   something like `kraken-trades-withdraw`. Turn **on** only:
-   - Query funds
-   - Withdraw funds
-
-   Leave everything else off, including all order permissions.
-3. Open `.env` in a text editor, the same way as Step 4, and paste the new key
-   into the withdraw lines:
-
-   ```
-   KRAKEN_WITHDRAW_KEY=paste_your_withdraw_api_key_here
-   KRAKEN_WITHDRAW_SECRET=paste_your_withdraw_private_key_here
-   ```
-
-   For a second account, use the `_2` withdraw lines with a withdraw key made on
-   that account.
-4. Back in Claude, say:
+2. Go to https://www.kraken.com/u/security/api, edit your `kraken-trades` key,
+   and turn **on** "Withdraw funds". Save. Your key and `.env` stay exactly the
+   same. For a second account, do the same on that account's key.
+3. Back in Claude, say:
 
 > List my saved withdrawal addresses on main.
 
@@ -172,16 +165,16 @@ ending in `--live`. You run it and type the last 6 characters of the address to
 confirm. Crypto withdrawals cannot be reversed, so read that address every
 time.
 
-To turn withdrawals off again, delete the withdraw key on Kraken and blank out
-the two lines in `.env`.
+To turn withdrawals off again, edit the key on Kraken and turn "Withdraw
+funds" back off.
 
 ## The rules, one more time
 
 - Claude never runs `--live`. You do, and you type `CONFIRM` yourself.
 - Every order file gets a dry-run first. If the dry-run fails, fix the file and
   dry-run it again before anything goes live.
-- Your trading key never has withdrawal permission. If you turn on
-  withdrawals, they use their own separate key.
+- Your key only has "Withdraw funds" if you turned it on, and it can only send
+  to addresses you saved on Kraken. Only save addresses you control.
 - Your `.env` file never leaves your computer and never goes into a chat.
 - `split` never touches your account. It only writes a file.
 - A shared move from anyone in the community is information, not a decision.
@@ -202,7 +195,7 @@ Paste any error into Claude first. It can usually fix it. The common ones:
 | `EAPI:Invalid nonce` | Two programs used the key at the same instant | Wait a few seconds and run it again |
 | `EOrder:Insufficient funds` | Not enough balance for the order | Check `balance` and shrink the order |
 | `Account mismatch` | The order file says one account and `--account` says another | Regenerate the file for the right account |
-| `Withdrawals are off for account 'main'` | No withdraw key in `.env` | Only if you want them, follow "Optional. Withdrawals" above |
+| `permission denied. Withdrawals are off` | Your key does not have "Withdraw funds" | Only if you want them, follow "Optional. Withdrawals" above |
 | `No saved ... withdrawal address named ...` | The `--to` name does not match a saved address exactly | Ask Claude to list your withdrawal addresses and copy the name exactly |
 | `below Kraken's minimum withdrawal` | Each network has a minimum | Send more, or wait until you hold more |
 | `NotOpenSSLWarning` on a Mac | A harmless Python warning | Ignore it |

@@ -73,10 +73,9 @@ def load_accounts() -> dict:
         return json.load(f)["accounts"]
 
 
-def get_api(account_name: str, withdraw: bool = False) -> krakenex.API:
+def get_api(account_name: str) -> krakenex.API:
     """Build an authenticated API client for a named account. Prints a banner
-    so it is always visible which account a private call is about to touch.
-    withdraw=True uses the account's separate withdraw-only key instead."""
+    so it is always visible which account a private call is about to touch."""
     accounts = load_accounts()
     if account_name not in accounts:
         _abort(
@@ -85,17 +84,6 @@ def get_api(account_name: str, withdraw: bool = False) -> krakenex.API:
         )
     acct = accounts[account_name]
     load_dotenv(SCRIPT_DIR / ".env")
-    if withdraw:
-        key_env = acct.get("withdraw_key_env")
-        secret_env = acct.get("withdraw_secret_env")
-        if not (key_env and secret_env and os.environ.get(key_env)
-                and os.environ.get(secret_env)):
-            _abort(
-                f"Withdrawals are off for account '{account_name}'. They are "
-                f"optional and need a separate withdraw-only API key. See "
-                f"'Optional. Withdrawals' in SETUP.md to turn them on."
-            )
-        acct = dict(acct, key_env=key_env, secret_env=secret_env)
     key = os.environ.get(acct["key_env"])
     secret = os.environ.get(acct["secret_env"])
     if not key or not secret:
@@ -751,9 +739,10 @@ def cmd_split_iceberg(args) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Withdrawals (optional, off by default). They use a separate withdraw-only
-# API key so the everyday trading key never has withdrawal permission.
-# Funds can only go to addresses already saved (and email-verified) in the
+# Withdrawals. Available whenever the account's API key has Kraken's
+# "Withdraw Funds" permission; without it Kraken refuses and we explain how
+# to turn it on. Funds can only go to addresses already saved (and
+# email-verified) in the
 # Kraken web UI. The API cannot add addresses; it refers to them by the name
 # ("key") you gave them there. Dry-run unless --live.
 # ---------------------------------------------------------------------------
@@ -761,8 +750,9 @@ def cmd_split_iceberg(args) -> None:
 def _withdraw_error_hint(resp: dict, endpoint: str) -> None:
     errors = resp.get("error") or []
     if any("Permission denied" in str(e) for e in errors):
-        _abort(f"Kraken {endpoint}: permission denied. The withdraw key needs "
-               f"the 'Query Funds' and 'Withdraw Funds' permissions")
+        _abort(f"Kraken {endpoint}: permission denied. Withdrawals are off for "
+               f"this account's API key. To turn them on, edit the key on Kraken "
+               f"and enable 'Withdraw Funds'. See 'Optional. Withdrawals' in SETUP.md")
     _assert_no_error(resp, endpoint)
 
 
@@ -804,7 +794,7 @@ def fetch_withdraw_addresses(api: krakenex.API, asset: str = None) -> list:
 
 
 def cmd_withdraw_addresses(args) -> None:
-    api = get_api(args.account, withdraw=True)
+    api = get_api(args.account)
     asset = resolve_asset(args.asset)[0] if args.asset else None
     rows = fetch_withdraw_addresses(api, asset)
     if not rows:
@@ -831,7 +821,7 @@ def cmd_withdraw(args) -> None:
     if amount <= 0:
         _abort("Amount must be positive")
 
-    api = get_api(args.account, withdraw=True)
+    api = get_api(args.account)
     asset, balance_code = resolve_asset(args.asset)
 
     matches = [r for r in fetch_withdraw_addresses(api, asset)
@@ -930,7 +920,7 @@ def cmd_withdraw(args) -> None:
 
 
 def cmd_withdraw_status(args) -> None:
-    api = get_api(args.account, withdraw=True)
+    api = get_api(args.account)
     params = {"asset": resolve_asset(args.asset)[0]} if args.asset else {}
     resp = api.query_private("WithdrawStatus", params)
     _withdraw_error_hint(resp, "WithdrawStatus")

@@ -7,9 +7,9 @@ order file, with Claude Code doing the preparation and you doing the pressing
 of the button. It handles one or two Kraken accounts.
 
 Everything is **dry-run by default**. `--live` shows the full order list and
-requires typing `CONFIRM`. Your trading key needs order permissions only and
-never gets withdrawal permission. Withdrawals are an optional add-on with their
-own separate key, and they stay off unless you turn them on.
+requires typing `CONFIRM`. Your API key needs order permissions to trade.
+Withdrawals are built in but only work if you also turn on "Withdraw funds" for
+your key on Kraken, and even then only to addresses you saved on Kraken.
 
 New here? Start with [SETUP.md](SETUP.md). Open this folder in the Claude
 desktop app's Code tab, paste one prompt, and Claude does most of the setup.
@@ -106,10 +106,9 @@ python3 kraken.py cancel-all --account main                   # asks for CONFIRM
 
 ## Withdrawals (optional)
 
-Off by default. To turn them on you create a second Kraken key that can only
-check balances and withdraw, and put it in the `KRAKEN_WITHDRAW_` lines of
-`.env`. Your trading key never changes. The steps are in
-[SETUP.md](SETUP.md) under "Optional. Withdrawals".
+The commands are always there. Whether they work is decided on Kraken: turn on
+"Withdraw funds" for your API key and they work, leave it off and Kraken
+refuses. The steps are in [SETUP.md](SETUP.md) under "Optional. Withdrawals".
 
 Kraken only lets the API send funds to addresses you have already saved and
 confirmed by email on Kraken's website. You refer to them by the name you gave
@@ -143,8 +142,9 @@ minimum withdrawal, and the dry-run tells you if you are under it.
   Kraken's server-side `validate=true` for every single order.
 - `--live` prints every order again and waits for you to type `CONFIRM`.
 - Every live order, cancel, and withdrawal is appended to `logs/trade_log.jsonl`.
-- Withdrawals are off unless you add a separate withdraw-only key. They only go
-  to addresses saved and email-confirmed on Kraken's website, and `--live`
+- Withdrawals only work if your key has Kraken's "Withdraw funds" permission.
+  They only go to addresses saved and email-confirmed on Kraken's website, so
+  even a stolen key could only send to your own saved list. `--live`
   makes you type the last 6 characters of the address. The live request also
   carries the address and the fee you were shown, so Kraken rejects it if
   either one changed.

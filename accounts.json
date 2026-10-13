@@ -3,16 +3,12 @@
     "main": {
       "key_env": "KRAKEN_API_KEY",
       "secret_env": "KRAKEN_API_SECRET",
-      "description": "Primary Kraken account",
-      "withdraw_key_env": "KRAKEN_WITHDRAW_KEY",
-      "withdraw_secret_env": "KRAKEN_WITHDRAW_SECRET"
+      "description": "Primary Kraken account"
     },
     "second": {
       "key_env": "KRAKEN_API_KEY_2",
       "secret_env": "KRAKEN_API_SECRET_2",
-      "description": "Second Kraken account (optional)",
-      "withdraw_key_env": "KRAKEN_WITHDRAW_KEY_2",
-      "withdraw_secret_env": "KRAKEN_WITHDRAW_SECRET_2"
+      "description": "Second Kraken account (optional)"
     }
   }
 }

@@ -68,13 +68,13 @@ Claude MUST hand to the user (side-effectful):
   (see the README), but say so when relevant.
 - Balance asset codes come from AssetPairs `base` (LUNAUSD is `LUNA`). Some
   assets use X/Z-prefixed codes like `XXBT` and `ZUSD`.
-- Withdrawals are optional and off by default. They use a separate
-  withdraw-only key (`KRAKEN_WITHDRAW_*` in `.env`, mapped in `accounts.json`).
-  Never suggest adding withdraw permission to the trading key. Funds only go to
-  addresses saved and email-confirmed on Kraken's website, referenced by their
-  Kraken name (`--to`). Never invent, guess, or edit a destination address. The
-  amount includes Kraken's fee. If the user asks to withdraw and gets
-  "Withdrawals are off", point them to "Optional. Withdrawals" in SETUP.md.
+- Withdrawals work only if the account's API key has Kraken's "Withdraw funds"
+  permission. That checkbox on Kraken is the on and off switch. If Kraken
+  answers permission denied, point the user to "Optional. Withdrawals" in
+  SETUP.md. Funds only go to addresses saved and email-confirmed on Kraken's
+  website, referenced by their Kraken name (`--to`). Never invent, guess, or
+  edit a destination address. Remind users to save only addresses they
+  control. The amount includes Kraken's fee.
 - `logs/trade_log.jsonl` is append-only history of every live order, cancel,
   and withdrawal this tool made. Never edit or delete it.
 - `orders/examples/` holds sample files for reference only. Never place them.
