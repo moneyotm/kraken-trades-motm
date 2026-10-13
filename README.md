@@ -7,8 +7,9 @@ order file, with Claude Code doing the preparation and you doing the pressing
 of the button. It handles one or two Kraken accounts.
 
 Everything is **dry-run by default**. `--live` shows the full order list and
-requires typing `CONFIRM`. Your API keys need order permissions only. No
-withdrawal permissions, ever.
+requires typing `CONFIRM`. Your trading key needs order permissions only and
+never gets withdrawal permission. Withdrawals are an optional add-on with their
+own separate key, and they stay off unless you turn them on.
 
 New here? Start with [SETUP.md](SETUP.md). Open this folder in the Claude
 desktop app's Code tab, paste one prompt, and Claude does most of the setup.
@@ -23,7 +24,7 @@ The only part you do by hand is creating the Kraken API key.
 | `.env` | Your API keys. Created by you from `.env.example`. Never committed, never shared. |
 | `orders/` | Order files you generate. Each one is a JSON list of orders for one account. |
 | `orders/examples/` | Three sample order files so you can see the format. |
-| `logs/trade_log.jsonl` | Append-only history of every live order and cancel this tool has made. Created automatically. |
+| `logs/trade_log.jsonl` | Append-only history of every live order, cancel, and withdrawal this tool has made. Created automatically. |
 | `CLAUDE.md` | The rules Claude Code follows in this folder. Read it once. |
 
 ## Setup in short
@@ -103,6 +104,35 @@ python3 kraken.py cancel OABC12-XXXXX-YYYYYY --account main   # shows the order,
 python3 kraken.py cancel-all --account main                   # asks for CONFIRM
 ```
 
+## Withdrawals (optional)
+
+Off by default. To turn them on you create a second Kraken key that can only
+check balances and withdraw, and put it in the `KRAKEN_WITHDRAW_` lines of
+`.env`. Your trading key never changes. The steps are in
+[SETUP.md](SETUP.md) under "Optional. Withdrawals".
+
+Kraken only lets the API send funds to addresses you have already saved and
+confirmed by email on Kraken's website. You refer to them by the name you gave
+them there.
+
+```bash
+# See your saved addresses and the names to use with --to
+python3 kraken.py withdraw-addresses --account main --asset XRP
+
+# Dry-run: shows the full address, network, fee, amount that arrives, and
+# your available balance. Sends nothing.
+python3 kraken.py withdraw XRP 100 --to "My Ledger XRP" --account main
+
+# Live: asks you to type the last 6 characters of the destination address
+python3 kraken.py withdraw XRP 100 --to "My Ledger XRP" --account main --live
+
+# Recent withdrawals and their status
+python3 kraken.py withdraw-status --account main
+```
+
+The amount includes Kraken's fee, so slightly less arrives. Each network has a
+minimum withdrawal, and the dry-run tells you if you are under it.
+
 ## Safety design
 
 - `--account` is required on every private command. There is no default account,
@@ -112,7 +142,12 @@ python3 kraken.py cancel-all --account main                   # asks for CONFIRM
 - Dry-run means local checks (balance, minimums, decimal precision) **plus**
   Kraken's server-side `validate=true` for every single order.
 - `--live` prints every order again and waits for you to type `CONFIRM`.
-- Every live order and cancel is appended to `logs/trade_log.jsonl`.
+- Every live order, cancel, and withdrawal is appended to `logs/trade_log.jsonl`.
+- Withdrawals are off unless you add a separate withdraw-only key. They only go
+  to addresses saved and email-confirmed on Kraken's website, and `--live`
+  makes you type the last 6 characters of the address. The live request also
+  carries the address and the fee you were shown, so Kraken rejects it if
+  either one changed.
 - Unknown keys in an order file abort the run. A typo like `pricee` is never
   silently dropped on the way to Kraken.
 - Your `.env`, your `logs/`, and your own `orders/*.json` are all in

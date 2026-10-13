@@ -73,9 +73,10 @@ def load_accounts() -> dict:
         return json.load(f)["accounts"]
 
 
-def get_api(account_name: str) -> krakenex.API:
+def get_api(account_name: str, withdraw: bool = False) -> krakenex.API:
     """Build an authenticated API client for a named account. Prints a banner
-    so it is always visible which account a private call is about to touch."""
+    so it is always visible which account a private call is about to touch.
+    withdraw=True uses the account's separate withdraw-only key instead."""
     accounts = load_accounts()
     if account_name not in accounts:
         _abort(
@@ -84,6 +85,17 @@ def get_api(account_name: str) -> krakenex.API:
         )
     acct = accounts[account_name]
     load_dotenv(SCRIPT_DIR / ".env")
+    if withdraw:
+        key_env = acct.get("withdraw_key_env")
+        secret_env = acct.get("withdraw_secret_env")
+        if not (key_env and secret_env and os.environ.get(key_env)
+                and os.environ.get(secret_env)):
+            _abort(
+                f"Withdrawals are off for account '{account_name}'. They are "
+                f"optional and need a separate withdraw-only API key. See "
+                f"'Optional. Withdrawals' in SETUP.md to turn them on."
+            )
+        acct = dict(acct, key_env=key_env, secret_env=secret_env)
     key = os.environ.get(acct["key_env"])
     secret = os.environ.get(acct["secret_env"])
     if not key or not secret:
@@ -739,6 +751,206 @@ def cmd_split_iceberg(args) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Withdrawals (optional, off by default). They use a separate withdraw-only
+# API key so the everyday trading key never has withdrawal permission.
+# Funds can only go to addresses already saved (and email-verified) in the
+# Kraken web UI. The API cannot add addresses; it refers to them by the name
+# ("key") you gave them there. Dry-run unless --live.
+# ---------------------------------------------------------------------------
+
+def _withdraw_error_hint(resp: dict, endpoint: str) -> None:
+    errors = resp.get("error") or []
+    if any("Permission denied" in str(e) for e in errors):
+        _abort(f"Kraken {endpoint}: permission denied. The withdraw key needs "
+               f"the 'Query Funds' and 'Withdraw Funds' permissions")
+    _assert_no_error(resp, endpoint)
+
+
+def resolve_asset(asset: str) -> tuple:
+    """Return (altname, balance_code) for a user-supplied asset, e.g.
+    BTC -> ('XBT', 'XXBT'), SOL -> ('SOL', 'SOL'). Kraken answers 'BTC' under
+    a non-balance key, so re-query by altname to get the canonical code."""
+    api = get_public_api()
+    resp = api.query_public("Assets", {"asset": asset.upper()})
+    if resp.get("error"):
+        _abort(f"Unknown asset '{asset}': {resp['error']}")
+    altname = next(iter(resp["result"].values()))["altname"]
+    resp = api.query_public("Assets", {"asset": altname})
+    _assert_no_error(resp, "Assets")
+    return altname, next(iter(resp["result"]))
+
+
+def asset_display_names() -> dict:
+    """Map Kraken's internal asset codes to the names people type,
+    e.g. XXRP -> XRP, XXLM -> XLM, ZUSD -> USD."""
+    resp = get_public_api().query_public("Assets")
+    if resp.get("error"):
+        return {}
+    return {code: info.get("altname", code) for code, info in resp["result"].items()}
+
+
+def _fmt_aligned(value: str, int_width: int = 15, frac_width: int = 10) -> str:
+    """Right-align the whole part and left-align the fraction so the decimal
+    points line up no matter how many decimals each asset uses."""
+    whole, _, frac = f"{Decimal(value):,f}".partition(".")
+    return f"{whole:>{int_width}}" + (f".{frac:<{frac_width}}" if frac else " " * (frac_width + 1))
+
+
+def fetch_withdraw_addresses(api: krakenex.API, asset: str = None) -> list:
+    params = {"asset": asset} if asset else {}
+    resp = api.query_private("WithdrawAddresses", params)
+    _withdraw_error_hint(resp, "WithdrawAddresses")
+    return resp["result"]
+
+
+def cmd_withdraw_addresses(args) -> None:
+    api = get_api(args.account, withdraw=True)
+    asset = resolve_asset(args.asset)[0] if args.asset else None
+    rows = fetch_withdraw_addresses(api, asset)
+    if not rows:
+        print("No saved withdrawal addresses"
+              + (f" for {asset}." if asset else ".")
+              + "\nAdd them in the Kraken web UI: Funding > Withdraw > Add address.")
+        return
+    print(f"{'Name (use with --to)':<28} {'Asset':<6} {'Verified':<9} {'Method':<22} Address")
+    print("-" * 110)
+    for r in sorted(rows, key=lambda r: (r.get("asset", ""), r.get("key", ""))):
+        addr = r.get("address", "")
+        if r.get("memo"):
+            addr += f"  memo={r['memo']}"
+        print(f"{r.get('key', ''):<28} {r.get('asset', ''):<6} "
+              f"{'yes' if r.get('verified') else 'NO':<9} "
+              f"{r.get('method', ''):<22} {addr}")
+
+
+def cmd_withdraw(args) -> None:
+    try:
+        amount = Decimal(args.amount)
+    except InvalidOperation:
+        _abort(f"Amount '{args.amount}' is not a number")
+    if amount <= 0:
+        _abort("Amount must be positive")
+
+    api = get_api(args.account, withdraw=True)
+    asset, balance_code = resolve_asset(args.asset)
+
+    matches = [r for r in fetch_withdraw_addresses(api, asset)
+               if r.get("key") == args.to]
+    if not matches:
+        _abort(f"No saved {asset} withdrawal address named '{args.to}' on "
+               f"'{args.account}'. List them with:\n"
+               f"  python3 kraken.py withdraw-addresses --account {args.account} "
+               f"--asset {asset}")
+    if len(matches) > 1:
+        _abort(f"'{args.to}' matches {len(matches)} saved addresses. Rename them "
+               f"in Kraken so the name is unique")
+    dest = matches[0]
+    if not dest.get("verified"):
+        _abort(f"Address '{args.to}' is not verified yet. Confirm it via the "
+               f"Kraken email before withdrawing")
+
+    resp = api.query_private("BalanceEx")
+    _assert_no_error(resp, "BalanceEx")
+    bal = resp["result"].get(balance_code) or resp["result"].get(asset)
+    available = (Decimal(bal["balance"]) - Decimal(bal.get("hold_trade", "0"))
+                 if bal else Decimal(0))
+    if amount > available:
+        _abort(f"Amount {amount:,f} {asset} exceeds available balance "
+               f"{available:,f} (balance minus funds held in open orders)")
+
+    # Kraken answers a below-minimum WithdrawInfo with a bare "Invalid
+    # arguments", so check the per-network minimum ourselves first.
+    resp = api.query_private("WithdrawMethods", {"asset": asset})
+    _withdraw_error_hint(resp, "WithdrawMethods")
+    methods = [m for m in resp["result"] if m.get("method") == dest.get("method")]
+    minimum = Decimal(methods[0]["minimum"]) if methods and methods[0].get("minimum") else None
+    if minimum is not None and amount < minimum:
+        _abort(f"Amount {amount:,f} {asset} is below Kraken's minimum withdrawal "
+               f"of {minimum:,f} {asset} on {dest.get('method')}")
+
+    resp = api.query_private("WithdrawInfo",
+                             {"asset": asset, "key": args.to, "amount": args.amount})
+    _withdraw_error_hint(resp, "WithdrawInfo")
+    info = resp["result"]
+    fee = Decimal(info["fee"])
+    if args.max_fee is not None and fee > Decimal(args.max_fee):
+        _abort(f"Quoted fee {fee:,f} {asset} exceeds --max-fee {args.max_fee}")
+
+    print("=" * 60)
+    print(("LIVE MODE" if args.live else "DRY-RUN") + " — Withdrawal")
+    print("=" * 60)
+    print(f"  Asset        : {asset}")
+    print(f"  Amount       : {amount:,f}  (fee comes out of this)")
+    print(f"  Kraken fee   : {fee:,f}")
+    print(f"  Arrives      : {Decimal(info['amount']):,f}")
+    print(f"  Limit        : {Decimal(info['limit']):,f}  (max withdrawable now)")
+    print(f"  To (name)    : {args.to}")
+    print(f"  To (address) : {dest['address']}")
+    if dest.get("memo"):
+        print(f"  Memo / tag   : {dest['memo']}")
+    print(f"  Network      : {dest.get('method') or info.get('method', '')}")
+    print(f"  Available    : {available:,f} {asset}")
+    print()
+
+    if not args.live:
+        print("Dry-run complete. Nothing was withdrawn.")
+        print(f"To withdraw for real, run:\n"
+              f"  python3 kraken.py withdraw {asset} {args.amount} --to \"{args.to}\" "
+              f"--account {args.account} --live")
+        return
+
+    tail = dest["address"][-6:]
+    print("!" * 60)
+    print(f"  WARNING: This sends REAL funds off the '{args.account}' account.")
+    print("  Crypto withdrawals cannot be reversed.")
+    print("!" * 60)
+    answer = input(f"\nType the LAST 6 characters of the destination address "
+                   f"to withdraw, or anything else to abort: ")
+    if answer.strip() != tail:
+        print("Aborted.")
+        sys.exit(0)
+
+    # address + max_fee make Kraken itself reject the request if the saved
+    # address changed or the fee rose since the quote shown above.
+    params = {"asset": asset, "key": args.to, "amount": args.amount,
+              "address": dest["address"], "max_fee": info["fee"]}
+    resp = api.query_private("Withdraw", params)
+    error = resp.get("error") or None
+    refid = resp.get("result", {}).get("refid") if not error else None
+    write_log({
+        "ts": _utc_now(), "event": "withdraw", "account": args.account,
+        "params": params, "refid": refid,
+        "error": error if not error else [str(e) for e in error],
+    })
+    if error:
+        _abort(f"Withdraw failed: {error}")
+    print(f"\nWithdrawal submitted. Reference ID: {refid}")
+    print(f"Track it with: python3 kraken.py withdraw-status --account "
+          f"{args.account} --asset {asset}")
+
+
+def cmd_withdraw_status(args) -> None:
+    api = get_api(args.account, withdraw=True)
+    params = {"asset": resolve_asset(args.asset)[0]} if args.asset else {}
+    resp = api.query_private("WithdrawStatus", params)
+    _withdraw_error_hint(resp, "WithdrawStatus")
+    rows = resp["result"]
+    if not rows:
+        print("No recent withdrawals.")
+        return
+    names = asset_display_names()
+    print(f"{'Time (UTC)':<20} {'Asset':<6} {'Amount':>26} {'Fee':>22}  "
+          f"{'Status':<10} {'RefID':<31} TxID")
+    print("-" * 150)
+    for r in sorted(rows, key=lambda r: r.get("time", 0), reverse=True):
+        ts = datetime.fromtimestamp(r.get("time", 0), timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        asset = names.get(r.get("asset", ""), r.get("asset", ""))
+        print(f"{ts:<20} {asset:<6} {_fmt_aligned(r.get('amount', '0'))} "
+              f"{_fmt_aligned(r.get('fee', '0'), 11)}  {r.get('status', ''):<10} "
+              f"{r.get('refid', ''):<31} {r.get('txid') or ''}")
+
+
+# ---------------------------------------------------------------------------
 # cancel / cancel-all
 # ---------------------------------------------------------------------------
 
@@ -900,6 +1112,30 @@ def main() -> None:
     p = sub.add_parser("cancel-all", help="Cancel ALL open orders on an account")
     _add_account_arg(p)
     p.set_defaults(func=cmd_cancel_all)
+
+    p = sub.add_parser("withdraw-addresses",
+                       help="List withdrawal addresses saved in Kraken (by name)")
+    _add_account_arg(p)
+    p.add_argument("--asset", help="Filter by asset, e.g. SOL, BTC")
+    p.set_defaults(func=cmd_withdraw_addresses)
+
+    p = sub.add_parser("withdraw", help="Withdraw to a saved address "
+                                        "(dry-run unless --live)")
+    p.add_argument("asset", metavar="ASSET", help="e.g. SOL, BTC, USDC")
+    p.add_argument("amount", metavar="AMOUNT",
+                   help="Amount to withdraw, fee included (as a string, e.g. 1.5)")
+    p.add_argument("--to", required=True,
+                   help="Saved address name exactly as shown by withdraw-addresses")
+    _add_account_arg(p)
+    p.add_argument("--max-fee", help="Abort if Kraken's quoted fee is above this")
+    p.add_argument("--live", action="store_true",
+                   help="Send for real (requires typing the address's last 6 chars)")
+    p.set_defaults(func=cmd_withdraw)
+
+    p = sub.add_parser("withdraw-status", help="Recent withdrawals and their status")
+    _add_account_arg(p)
+    p.add_argument("--asset", help="Filter by asset")
+    p.set_defaults(func=cmd_withdraw_status)
 
     args = parser.parse_args()
     try:

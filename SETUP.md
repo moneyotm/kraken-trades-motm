@@ -132,12 +132,56 @@ ask Claude to rename it in `accounts.json`, or open that file and change the
 word `second` to whatever you like, such as `roth` or `spouse`. Keep the name
 short, lowercase, and with no spaces.
 
+## Optional. Withdrawals
+
+Skip this unless you want Claude to prepare withdrawals for you. Most members
+never need it, and you can always withdraw on Kraken's website instead.
+
+Withdrawals use their own key, separate from your trading key. Your trading key
+keeps the exact permissions from Step 4 and never gets withdrawal permission.
+That way the key you use every day still cannot move funds off Kraken.
+
+1. On Kraken's website, save every address you want to send to: Funding, then
+   Withdraw, pick the asset, then Add address. Give each one a clear name such
+   as `My Ledger XRP`, and confirm the email Kraken sends you. The tool can only
+   send to addresses saved this way. It cannot add new ones.
+2. Go to https://www.kraken.com/u/security/api and create a **new** key named
+   something like `kraken-trades-withdraw`. Turn **on** only:
+   - Query funds
+   - Withdraw funds
+
+   Leave everything else off, including all order permissions.
+3. Open `.env` in a text editor, the same way as Step 4, and paste the new key
+   into the withdraw lines:
+
+   ```
+   KRAKEN_WITHDRAW_KEY=paste_your_withdraw_api_key_here
+   KRAKEN_WITHDRAW_SECRET=paste_your_withdraw_private_key_here
+   ```
+
+   For a second account, use the `_2` withdraw lines with a withdraw key made on
+   that account.
+4. Back in Claude, say:
+
+> List my saved withdrawal addresses on main.
+
+From then on you can ask in plain English, such as "withdraw 100 XRP to My
+Ledger XRP from main." Claude runs the dry-run and shows you the full address,
+network, fee, and the amount that will arrive. Then it hands you a command
+ending in `--live`. You run it and type the last 6 characters of the address to
+confirm. Crypto withdrawals cannot be reversed, so read that address every
+time.
+
+To turn withdrawals off again, delete the withdraw key on Kraken and blank out
+the two lines in `.env`.
+
 ## The rules, one more time
 
 - Claude never runs `--live`. You do, and you type `CONFIRM` yourself.
 - Every order file gets a dry-run first. If the dry-run fails, fix the file and
   dry-run it again before anything goes live.
-- Your API key never has withdrawal permission.
+- Your trading key never has withdrawal permission. If you turn on
+  withdrawals, they use their own separate key.
 - Your `.env` file never leaves your computer and never goes into a chat.
 - `split` never touches your account. It only writes a file.
 - A shared move from anyone in the community is information, not a decision.
@@ -158,6 +202,9 @@ Paste any error into Claude first. It can usually fix it. The common ones:
 | `EAPI:Invalid nonce` | Two programs used the key at the same instant | Wait a few seconds and run it again |
 | `EOrder:Insufficient funds` | Not enough balance for the order | Check `balance` and shrink the order |
 | `Account mismatch` | The order file says one account and `--account` says another | Regenerate the file for the right account |
+| `Withdrawals are off for account 'main'` | No withdraw key in `.env` | Only if you want them, follow "Optional. Withdrawals" above |
+| `No saved ... withdrawal address named ...` | The `--to` name does not match a saved address exactly | Ask Claude to list your withdrawal addresses and copy the name exactly |
+| `below Kraken's minimum withdrawal` | Each network has a minimum | Send more, or wait until you hold more |
 | `NotOpenSSLWarning` on a Mac | A harmless Python warning | Ignore it |
 | Claude says it will not run `--live` | It is doing its job | Run the command yourself |
 

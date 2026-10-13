@@ -15,9 +15,13 @@ Claude MAY freely run (read-only, places nothing):
 - `balance`, `ticker`, `pair-info`, `open-orders`, `closed-orders`, `trades`
 - `place <file> --account X` (dry-run: local preflight plus Kraken `validate=true`)
 - `split ladder|chunk|iceberg ...` (only generates a JSON file)
+- `withdraw-addresses`, `withdraw-status`
+- `withdraw ASSET AMOUNT --to NAME --account X` (dry-run: shows the resolved
+  address, fee, and net amount, sends nothing)
 
 Claude MUST hand to the user (side-effectful):
 - `place <file> --account X --live`
+- `withdraw ... --live`. The user types the last 6 characters of the address.
 - `cancel` / `cancel-all`. These are the user's call. Hand them over unless the
   user explicitly asked Claude to cancel something specific, and even then note
   that cancels prompt for interactive confirmation.
@@ -64,8 +68,15 @@ Claude MUST hand to the user (side-effectful):
   (see the README), but say so when relevant.
 - Balance asset codes come from AssetPairs `base` (LUNAUSD is `LUNA`). Some
   assets use X/Z-prefixed codes like `XXBT` and `ZUSD`.
-- `logs/trade_log.jsonl` is append-only history of every live order and cancel
-  this tool made. Never edit or delete it.
+- Withdrawals are optional and off by default. They use a separate
+  withdraw-only key (`KRAKEN_WITHDRAW_*` in `.env`, mapped in `accounts.json`).
+  Never suggest adding withdraw permission to the trading key. Funds only go to
+  addresses saved and email-confirmed on Kraken's website, referenced by their
+  Kraken name (`--to`). Never invent, guess, or edit a destination address. The
+  amount includes Kraken's fee. If the user asks to withdraw and gets
+  "Withdrawals are off", point them to "Optional. Withdrawals" in SETUP.md.
+- `logs/trade_log.jsonl` is append-only history of every live order, cancel,
+  and withdrawal this tool made. Never edit or delete it.
 - `orders/examples/` holds sample files for reference only. Never place them.
 
 ## Quick command reference
@@ -90,6 +101,11 @@ python3 kraken.py split chunk   --pair P --side S --price PR --total-volume V \
     --chunks N --account X -o orders/FILE.json
 python3 kraken.py split iceberg --pair P --side S --price PR --total-volume V \
     --display D --account X -o orders/FILE.json
+
+python3 kraken.py withdraw-addresses --account X [--asset XRP]
+python3 kraken.py withdraw   XRP 100 --to "NAME" --account X           # dry-run
+python3 kraken.py withdraw   XRP 100 --to "NAME" --account X --live    # USER ONLY
+python3 kraken.py withdraw-status --account X [--asset XRP]
 
 python3 kraken.py cancel     TXID [...] --account X     # USER (interactive y/N)
 python3 kraken.py cancel-all --account X                # USER (types CONFIRM)
